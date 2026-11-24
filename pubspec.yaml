@@ -1,5 +1,5 @@
 name: ban_do_hanh_trinh
-description: "A new Flutter project."
+description: "Ứng dụng Bản Đồ Hành Trình: Ghi lại lịch sử vị trí, khám phá cung đường thực tế (Fog of War) và thống kê mở khóa 63 tỉnh thành Việt Nam."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

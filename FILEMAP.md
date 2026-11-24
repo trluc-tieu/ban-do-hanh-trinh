@@ -18,7 +18,7 @@
 | **Icon phương tiện, đổi xe giữa chuyến & xem lại theo thời điểm** | `lib/models/vehicle_type.dart`<br>`lib/models/track_point.dart`<br>`lib/models/trip.dart`<br>`lib/widgets/vehicle_picker_sheet.dart`<br>`lib/screens/trip_detail_screen.dart` | `VehicleType` (mặc định `motorbike`), `Trip.recordVehicleSwitch()`, `TrackPoint.vehicleType`, `VehiclePickerSheet` |
 | **Hiển thị Bản đồ (Google Maps, OpenMap/NDAMaps Vector, OSM)** | `lib/widgets/goong_map_widget.dart`<br>`lib/widgets/vector_map_style_mixin.dart`<br>`lib/services/goong_service.dart`<br>`lib/services/openmap_service.dart`<br>`lib/widgets/smart_tile_provider.dart` | `GoongMapWidget`, `VectorMapStyleMixin`, `SmartTileProvider`, `GoongService`, `OpenMapService` |
 | **Tải sẵn bản đồ ngoại tuyến (Offline Tiles)** | `lib/services/offline_map_service.dart`<br>`lib/widgets/offline_map_preload_dialog.dart` | `OfflineMapService`, `OfflineMapPreloadDialog` |
-| **Tab 2: Khám Phá (Xếp hạng 63 Tỉnh/Thành Việt Nam)** | `lib/screens/province_ranking_screen.dart`<br>`lib/models/province_stats.dart`<br>`lib/providers/trip_provider.dart` | `ProvinceRankingScreen`, `VietnamProvinces`, `getProvinceRankings()` |
+| **Tab 2: Khám Phá (Xếp hạng 63 Tỉnh/Thành Việt Nam & Nhận diện mọi tỉnh đi qua)** | `lib/screens/province_ranking_screen.dart`<br>`lib/models/province_stats.dart`<br>`lib/services/exploration_calculator.dart`<br>`lib/providers/trip_provider.dart` | `ProvinceRankingScreen`, `VietnamProvinces.provinceForCoordinate()` (toạ độ offline 63 tỉnh), `ExplorationCalculator.computeSummary()` (chia km theo từng tỉnh trên toàn lộ trình), `_rebuildProvinceAggregates()` |
 | **Tab 3: Ảnh (Gom thư mục theo tên địa điểm & toạ độ gần nhau, không hiện bản đồ)** | `lib/screens/photo_discovery_screen.dart`<br>`lib/services/photo_discovery_service.dart` | `PhotoDiscoveryScreen`, `PhotoFolderCluster`, `PhotoDiscoveryService.groupPhotosIntoFolders()` |
 | **Tab 4: Thống kê theo tháng & Biểu đồ cột** | `lib/screens/monthly_stats_screen.dart`<br>`lib/models/monthly_stats.dart`<br>`lib/widgets/monthly_bar_chart.dart` | `MonthlyStatsScreen`, `MonthlyStats.calculate()`, `MonthlyBarChart` |
 | **Tab 5: Lịch sử chuyến đi & Chi tiết tua lộ trình** | `lib/screens/trips_history_screen.dart`<br>`lib/screens/trip_detail_screen.dart`<br>`lib/widgets/trip_card.dart` | `TripsHistoryScreen`, `TripDetailScreen`, `TripCard` |
@@ -27,7 +27,7 @@
 | **Cơ sở dữ liệu SQLite (Schema & Migration)** | `lib/services/database_service.dart` | `DatabaseService` (DB `journey_discovery.db`, version `6`) |
 | **Quyền Android & Icon ứng dụng** | `android/app/src/main/AndroidManifest.xml`<br>`android/app/src/main/res/mipmap-*/ic_launcher.png` | Permissions, `GeolocatorLocationService`, `@mipmap/ic_launcher` |
 | **Kiểm tra cập nhật & tự cài APK mới (GitHub Releases, hỗ trợ repo private)** | `lib/services/app_update_service.dart`<br>`lib/widgets/app_update_dialog.dart`<br>`lib/screens/settings_screen.dart`<br>`android/app/src/main/kotlin/trluc/top/ban_do_hanh_trinh/MainActivity.kt`<br>`android/app/src/main/res/xml/apk_installer_paths.xml` | `AppUpdateService.checkForUpdate()`, `downloadReleaseApk()`, `installApk()`, `AppUpdateDialog.checkAndPrompt()`, MethodChannel `trluc.top/app_updater` |
-| **Kiểm thử tự động (Unit Tests)** | `test/widget_test.dart`<br>`test/app_update_test.dart` | 20 bài kiểm thử models & services + kiểm thử so sánh phiên bản/parse release |
+| **Kiểm thử tự động (Unit Tests)** | `test/widget_test.dart`<br>`test/app_update_test.dart` | 26 bài kiểm thử models, services, đa tỉnh thành, cập nhật APK |
 
 ---
 
@@ -45,11 +45,12 @@
 - `lib/models/pinned_place.dart` — Địa điểm ghim tuỳ chỉnh trên bản đồ (`PinnedPlace` & 7 nhóm `PinnedPlaceCategory`: Công ty, Trường học, Quán quen, Quán ăn, Tham quan, Bãi xe, Yêu thích kèm icon/màu riêng).
 - `lib/models/vehicle_type.dart` — 7 loại biểu tượng phương tiện (`VehicleType`), góc xoay và bảng màu `kVehicleColors`.
 - `lib/models/monthly_stats.dart` — Dữ liệu thống kê tháng (`MonthlyStats`): `totalDistanceKm`, `newDistanceKm`, `distanceByDay`, `newDistanceByDay`.
-- `lib/models/province_stats.dart` — Dữ liệu & tọa độ nhận diện 63 tỉnh thành Việt Nam (`VietnamProvinces`, `ProvinceStats`).
+- `lib/models/province_stats.dart` — Dữ liệu & tọa độ nhận diện 63 tỉnh thành Việt Nam (`VietnamProvinces.provinceForCoordinate()`, `ProvinceStats` với `distanceKm` và `traveledKm`).
+- `lib/services/exploration_calculator.dart` — Lưới băm không gian `ExplorationIndex` (sai số làn đường `25m`, chia đoạn `20m`, trễ góc cua `60m`), `LiveExplorationTracker` và `ExplorationCalculator` tính chính xác km đường mới không trùng lặp và phân rã km theo từng tỉnh trên toàn lộ trình (`traveledMetersByTripProvince`, `newMetersByTripProvince`).
 
 ### 2.3. Quản lý trạng thái (`lib/providers/` — 3 files)
 - `lib/providers/tracking_provider.dart` — Điều phối ghi hành trình thời gian thực (khởi động tức thì `< 30ms`), tắt GPS nền khi nghỉ để tiết kiệm pin (`refreshCurrentLocationOnce()` khi bấm định vị), đổi phương tiện giữa chuyến (`setCurrentVehicleType`), theo dõi chạy ngầm tự mở chuyến (`configureBackgroundMonitoring`), đếm `currentNewDistanceKm` trực tiếp, tự ngắt khi dừng lâu.
-- `lib/providers/trip_provider.dart` — Quản lý danh sách chuyến đi, lộ trình khám phá, tính lại km khám phá duy nhất (`_recomputeExplorationMetrics`), quản lý `pinnedPlaces`, xếp hạng tỉnh và thống kê tháng.
+- `lib/providers/trip_provider.dart` — Quản lý danh sách chuyến đi, lộ trình khám phá, tính lại km khám phá duy nhất (`_recomputeExplorationMetrics`), phân rã km/chuyến theo từng tỉnh trên toàn tuyến (`_rebuildProvinceAggregates`), quản lý `pinnedPlaces`, xếp hạng tỉnh và thống kê tháng.
 - `lib/providers/map_settings_provider.dart` — Lưu trữ cài đặt vào `SharedPreferences`: nguồn bản đồ, API keys, lọc khoảng cách GPS, tự động ngắt khi dừng, bật/tắt chạy ngầm (`backgroundAutoTrack`, ngưỡng tốc độ & phạm vi), xe/màu/xoay bản đồ, ghim `"Nhà"` (bán kính mặc định `50m`).
 
 ### 2.4. Màn hình chính (`lib/screens/` — 8 files)
@@ -101,6 +102,7 @@
 - `android/app/src/main/AndroidManifest.xml` — Khai báo quyền GPS, `ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS` và icon `@mipmap/ic_launcher`.
 - `android/app/src/main/res/mipmap-*/ic_launcher.png` — Bộ ảnh icon launcher của ứng dụng theo mật độ màn hình (`mdpi` -> `xxxhdpi`).
 - `android/app/build.gradle.kts` & `android/build.gradle.kts` — Cấu hình Gradle Android (`compileSdk = 36`, `minSdk = 21`, AGP `9.1.0`).
-- `pubspec.yaml` — Khai báo dependencies và phiên bản ứng dụng.
-- `test/widget_test.dart` — Bộ 20 unit test kiểm tra toàn diện các thuật toán và model.
+- `pubspec.yaml` — Khai báo dependencies, mô tả dự án và phiên bản ứng dụng.
+- `README.md` — Tài liệu tổng quan dự án, kiến trúc đa bản đồ (Google Maps, OpenMap.vn/NDAMaps, OSM, Offline - không dùng Goong Map), 9 nhóm tính năng nổi bật và hướng dẫn cài đặt/phát triển.
+- `test/widget_test.dart` — Bộ 21 unit test kiểm tra toàn diện các thuật toán, phân bổ đa tỉnh thành và model.
 - `test/app_update_test.dart` — Test so sánh phiên bản và phân tích JSON release GitHub.

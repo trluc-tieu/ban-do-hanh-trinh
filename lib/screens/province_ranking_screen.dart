@@ -107,8 +107,8 @@ class _ProvinceRankingScreenState extends State<ProvinceRankingScreen> with Sing
     final totalKm = tripProvider.totalExploredKm;
     final progress = exploredCount / 63.0;
 
-    final exploredList = allRankings.where((p) => p.distanceKm > 0 || p.tripCount > 0).toList();
-    final unvisitedList = allRankings.where((p) => p.distanceKm == 0 && p.tripCount == 0).toList();
+    final exploredList = allRankings.where((p) => p.distanceKm > 0 || p.traveledKm > 0 || p.tripCount > 0).toList();
+    final unvisitedList = allRankings.where((p) => p.distanceKm == 0 && p.traveledKm == 0 && p.tripCount == 0).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -344,7 +344,7 @@ class _ProvinceRankingScreenState extends State<ProvinceRankingScreen> with Sing
       itemCount: list.length,
       itemBuilder: (ctx, index) {
         final p = list[index];
-        final isExplored = p.distanceKm > 0 || p.tripCount > 0;
+        final isExplored = p.distanceKm > 0 || p.traveledKm > 0 || p.tripCount > 0;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 8),
@@ -422,13 +422,21 @@ class _ProvinceRankingScreenState extends State<ProvinceRankingScreen> with Sing
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      '${p.distanceKm.toStringAsFixed(1)} km',
+                      '${(p.distanceKm > 0 ? p.distanceKm : p.traveledKm).toStringAsFixed(1)} km',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                         color: isExplored ? AppTheme.primary : Colors.grey,
                       ),
                     ),
+                    if (isExplored && p.distanceKm > 0 && p.traveledKm > p.distanceKm + 0.1)
+                      Text(
+                        'Tổng đi: ${p.traveledKm.toStringAsFixed(1)} km',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
                   ],
                 ),
               ],

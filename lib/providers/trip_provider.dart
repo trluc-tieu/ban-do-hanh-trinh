@@ -53,33 +53,55 @@ class TripProvider with ChangeNotifier {
     return getProvinceRankings().where((p) => p.distanceKm > 0 || p.tripCount > 0).length;
   }
 
-  /// Get personal exploration statistics ranked across Vietnam's 63 provinces
-  List<ProvinceStats> getProvinceRankings() {
-    final Map<String, double> distanceMap = {};
-    final Map<String, int> tripMap = {};
-    final Map<String, int> waypointMap = {};
+  // Per-province aggregates computed along the FULL route of every trip
+  // (every province crossed counts, not only the start/end province).
+  Map<String, double> _provinceNewKm = {};
+  Map<String, double> _provinceTraveledKm = {};
+  Map<String, int> _provinceTripCount = {};
+  List<ProvinceStats>? _cachedRankings;
+
+  /// Minimum distance driven inside a province for the trip to count as
+  /// having passed through it (filters GPS noise right on a border).
+  static const double minProvincePassMeters = 300.0;
+
+  /// Real traveled km inside each province (including repeated roads).
+  Map<String, double> get provinceTraveledKm => Map.unmodifiable(_provinceTraveledKm);
+
+  void _rebuildProvinceAggregates(ExplorationSummary summary) {
+    final Map<String, double> newKm = {};
+    final Map<String, double> traveledKm = {};
+    final Map<String, int> tripCount = {};
 
     for (final trip in _trips) {
-      final pts = _allExplorationRoutes[trip.id];
-      final double lat = (pts != null && pts.isNotEmpty)
-          ? pts.first.latitude
-          : (trip.points.isNotEmpty ? trip.points.first.latitude : 0.0);
-      final double lng = (pts != null && pts.isNotEmpty)
-          ? pts.first.longitude
-          : (trip.points.isNotEmpty ? trip.points.first.longitude : 0.0);
-      final province = VietnamProvinces.matchProvince(
-        lat,
-        lng,
-        '${trip.startAddress ?? ''} ${trip.endAddress ?? ''} ${trip.title}',
-      );
+      final traveled = summary.traveledMetersByTripProvince[trip.id] ?? const {};
+      final fresh = summary.newMetersByTripProvince[trip.id] ?? const {};
+      final totalTraveled = traveled.values.fold(0.0, (a, b) => a + b);
 
-      // Accumulate deduplicated newly explored distance so repeated trips in the same province don't double-count
-      distanceMap[province] = (distanceMap[province] ?? 0.0) + trip.newDistanceKm;
-      tripMap[province] = (tripMap[province] ?? 0) + 1;
-      waypointMap[province] = (waypointMap[province] ?? 0) + trip.waypoints.length;
+      traveled.forEach((province, meters) {
+        traveledKm[province] = (traveledKm[province] ?? 0.0) + meters / 1000.0;
+        // Count the province if the trip really drove through it, or when the
+        // whole trip is tiny (short trips still mark their start/end province).
+        if (meters >= minProvincePassMeters || totalTraveled < minProvincePassMeters * 2) {
+          tripCount[province] = (tripCount[province] ?? 0) + 1;
+        }
+      });
+      fresh.forEach((province, meters) {
+        newKm[province] = (newKm[province] ?? 0.0) + meters / 1000.0;
+      });
     }
 
-    // Include waypoints that may not be tied to full points
+    _provinceNewKm = newKm;
+    _provinceTraveledKm = traveledKm;
+    _provinceTripCount = tripCount;
+    _cachedRankings = null;
+  }
+
+  /// Get personal exploration statistics ranked across Vietnam's 63 provinces
+  List<ProvinceStats> getProvinceRankings() {
+    final cached = _cachedRankings;
+    if (cached != null) return cached;
+
+    final Map<String, int> waypointMap = {};
     for (final wp in _allWaypoints) {
       final province = VietnamProvinces.matchProvince(wp.latitude, wp.longitude, '${wp.name} ${wp.note ?? ''}');
       waypointMap[province] = (waypointMap[province] ?? 0) + 1;
@@ -90,15 +112,18 @@ class TripProvider with ChangeNotifier {
     for (final p in VietnamProvinces.allProvinces) {
       list.add(ProvinceStats(
         provinceName: p,
-        distanceKm: distanceMap[p] ?? 0.0,
-        tripCount: tripMap[p] ?? 0,
+        distanceKm: _provinceNewKm[p] ?? 0.0,
+        traveledKm: _provinceTraveledKm[p] ?? 0.0,
+        tripCount: _provinceTripCount[p] ?? 0,
         waypointCount: waypointMap[p] ?? 0,
       ));
     }
 
     // Sort by distance descending, then by trip count
     list.sort((a, b) {
-      final cmp = b.distanceKm.compareTo(a.distanceKm);
+      final aDist = a.distanceKm > 0 ? a.distanceKm : a.traveledKm;
+      final bDist = b.distanceKm > 0 ? b.distanceKm : b.traveledKm;
+      final cmp = bDist.compareTo(aDist);
       if (cmp != 0) return cmp;
       final tripCmp = b.tripCount.compareTo(a.tripCount);
       if (tripCmp != 0) return tripCmp;
@@ -110,12 +135,14 @@ class TripProvider with ChangeNotifier {
       rankedList.add(ProvinceStats(
         provinceName: list[i].provinceName,
         distanceKm: list[i].distanceKm,
+        traveledKm: list[i].traveledKm,
         tripCount: list[i].tripCount,
         waypointCount: list[i].waypointCount,
         rank: i + 1,
       ));
     }
 
+    _cachedRankings = rankedList;
     return rankedList;
   }
 
@@ -139,6 +166,7 @@ class TripProvider with ChangeNotifier {
   Future<void> _recomputeExplorationMetrics() async {
     final summary = ExplorationCalculator.computeSummary(_trips, _allExplorationRoutes);
     _uniqueExploredKm = summary.totalUniqueExploredMeters / 1000.0;
+    _rebuildProvinceAggregates(summary);
 
     final Map<String, double> dirtyUpdates = {};
     for (final trip in _trips) {

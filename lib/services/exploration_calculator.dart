@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:math' as math;
 import 'package:latlong2/latlong.dart';
+import '../models/province_stats.dart';
 import '../models/track_point.dart';
 import '../models/trip.dart';
 import 'location_service.dart';
@@ -42,10 +43,18 @@ class ExplorationSummary {
   final double totalTraveledMeters;
   final Map<String, double> newMetersByTripId;
 
+  /// tripId -> (province -> meters actually traveled inside that province).
+  final Map<String, Map<String, double>> traveledMetersByTripProvince;
+
+  /// tripId -> (province -> newly explored (deduplicated) meters in that province).
+  final Map<String, Map<String, double>> newMetersByTripProvince;
+
   const ExplorationSummary({
     required this.totalUniqueExploredMeters,
     required this.totalTraveledMeters,
     required this.newMetersByTripId,
+    this.traveledMetersByTripProvince = const {},
+    this.newMetersByTripProvince = const {},
   });
 }
 
@@ -150,7 +159,14 @@ class ExplorationIndex {
 
   /// Evaluates newly discovered meters for [points] while committing its segments
   /// into this index (including deduplicating backtracking within the same trip).
-  double evaluateAndAddTrip(List<TrackPoint> points) {
+  ///
+  /// [onSubSegment] (optional) receives every evaluated sub-segment midpoint,
+  /// its length in meters and whether it was newly explored — used to split
+  /// distances per province along the whole route (not just start/end).
+  double evaluateAndAddTrip(
+    List<TrackPoint> points, {
+    void Function(double midLat, double midLng, double meters, bool isNew)? onSubSegment,
+  }) {
     if (points.length < 2) return 0.0;
 
     double newMeters = 0.0;
@@ -173,6 +189,21 @@ class ExplorationIndex {
         // Flush lag buffer cleanly across GPS gaps so prior segment stays indexed.
         while (lagQueue.isNotEmpty) {
           _insertSegment(lagQueue.removeFirst());
+        }
+        // Still report the gap (as already-known distance) every ~1km so the
+        // provinces crossed during GPS signal loss are not missed.
+        if (onSubSegment != null && stepMeters <= 150000) {
+          final gapSteps = (stepMeters / 1000.0).ceil().clamp(1, 150);
+          final gapLen = stepMeters / gapSteps;
+          for (int g = 0; g < gapSteps; g++) {
+            final t = (g + 0.5) / gapSteps;
+            onSubSegment(
+              p1.latitude + (p2.latitude - p1.latitude) * t,
+              p1.longitude + (p2.longitude - p1.longitude) * t,
+              gapLen,
+              false,
+            );
+          }
         }
         continue;
       }
@@ -202,6 +233,7 @@ class ExplorationIndex {
         if (!isAlreadyExplored) {
           newMeters += subLen;
         }
+        onSubSegment?.call(midLat, midLng, subLen, !isAlreadyExplored);
 
         lagQueue.addLast(_IndexedSeg(
           aLat: aLat,
@@ -437,6 +469,8 @@ class ExplorationCalculator {
 
     final index = ExplorationIndex(toleranceMeters: toleranceMeters);
     final Map<String, double> newMetersByTripId = {};
+    final Map<String, Map<String, double>> traveledByTripProvince = {};
+    final Map<String, Map<String, double>> newByTripProvince = {};
     double totalUniqueMeters = 0.0;
     double totalTraveledMeters = 0.0;
 
@@ -447,19 +481,56 @@ class ExplorationCalculator {
           ? routesByTripId[trip.id]!
           : trip.points;
 
+      final Map<String, double> traveledProv = {};
+      final Map<String, double> newProv = {};
+
       double tripNewMeters;
       if (pts.length >= 2) {
-        final rawNew = index.evaluateAndAddTrip(pts);
+        final rawNew = index.evaluateAndAddTrip(
+          pts,
+          onSubSegment: (lat, lng, meters, isNew) {
+            final province = VietnamProvinces.matchProvince(lat, lng, null);
+            traveledProv[province] = (traveledProv[province] ?? 0.0) + meters;
+            if (isNew) {
+              newProv[province] = (newProv[province] ?? 0.0) + meters;
+            }
+          },
+        );
         // Never report newMeters > recorded totalDistance due to sub-step approximation.
         tripNewMeters = trip.totalDistance > 0
             ? rawNew.clamp(0.0, trip.totalDistance)
             : rawNew;
+
+        // Keep per-province new meters consistent with the clamped trip total.
+        if (rawNew > 0 && tripNewMeters < rawNew) {
+          final scale = tripNewMeters / rawNew;
+          newProv.updateAll((_, v) => v * scale);
+        }
+
+        // Always count the start & end provinces even for very short trips.
+        final startProv = VietnamProvinces.matchProvince(
+            pts.first.latitude, pts.first.longitude, trip.startAddress);
+        final endProv = VietnamProvinces.matchProvince(
+            pts.last.latitude, pts.last.longitude, trip.endAddress);
+        traveledProv.putIfAbsent(startProv, () => 0.0);
+        traveledProv.putIfAbsent(endProv, () => 0.0);
       } else {
         // Fallback for synthetic/imported summary trips without coordinate geometry.
         tripNewMeters = trip.totalDistance;
+        final lat = pts.isNotEmpty ? pts.first.latitude : 0.0;
+        final lng = pts.isNotEmpty ? pts.first.longitude : 0.0;
+        final province = VietnamProvinces.matchProvince(
+          lat,
+          lng,
+          '${trip.startAddress ?? ''} ${trip.title}',
+        );
+        traveledProv[province] = trip.totalDistance;
+        newProv[province] = trip.totalDistance;
       }
 
       newMetersByTripId[trip.id] = tripNewMeters;
+      traveledByTripProvince[trip.id] = traveledProv;
+      newByTripProvince[trip.id] = newProv;
       totalUniqueMeters += tripNewMeters;
     }
 
@@ -467,6 +538,8 @@ class ExplorationCalculator {
       totalUniqueExploredMeters: totalUniqueMeters,
       totalTraveledMeters: totalTraveledMeters,
       newMetersByTripId: newMetersByTripId,
+      traveledMetersByTripProvince: traveledByTripProvince,
+      newMetersByTripProvince: newByTripProvince,
     );
   }
 }

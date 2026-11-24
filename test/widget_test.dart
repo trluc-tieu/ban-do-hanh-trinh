@@ -160,6 +160,14 @@ void main() {
 
       final saigon = VietnamProvinces.matchProvince(10.77, 106.69, 'Quận 1, TP. Hồ Chí Minh');
       expect(saigon, 'TP. Hồ Chí Minh');
+
+      // Southern & Central Highlands provincial coordinate resolution
+      expect(VietnamProvinces.matchProvince(10.980, 106.652, null), 'Bình Dương');
+      expect(VietnamProvinces.matchProvince(10.957, 106.843, null), 'Đồng Nai');
+      expect(VietnamProvinces.matchProvince(11.940, 108.458, null), 'Lâm Đồng');
+      expect(VietnamProvinces.matchProvince(11.548, 107.807, null), 'Lâm Đồng');
+      expect(VietnamProvinces.matchProvince(11.310, 106.100, null), 'Tây Ninh');
+      expect(VietnamProvinces.matchProvince(10.535, 106.413, null), 'Long An');
     });
 
     test('ProvinceStats calculates tier names properly', () {
@@ -857,6 +865,83 @@ void main() {
       expect(folders[0].count, 2);
       expect(folders[1].title.toLowerCase(), 'hồ gươm');
       expect(folders[1].count, 3);
+    });
+
+    test('ExplorationCalculator accurately attributes multi-province route to all crossed provinces', () {
+      // Simulate trip from TP.HCM -> Bình Dương -> Đồng Nai -> Lâm Đồng
+      // with realistic dense points (each step ~100m, well within GPS recording tolerance)
+      final t0 = DateTime(2026, 11, 24, 6, 0);
+
+      final keyNodes = [
+        const [10.776, 106.700], // TP.HCM (Quận 1)
+        const [10.850, 106.750], // TP.HCM (Thủ Đức)
+        const [10.980, 106.652], // Bình Dương (Thủ Dầu Một)
+        const [10.957, 106.843], // Đồng Nai (Biên Hoà)
+        const [11.190, 107.340], // Đồng Nai (Định Quán)
+        const [11.548, 107.807], // Lâm Đồng (Bảo Lộc)
+        const [11.940, 108.458], // Lâm Đồng (Đà Lạt)
+      ];
+
+      final pts = <TrackPoint>[];
+      var curTime = t0;
+      for (int k = 1; k < keyNodes.length; k++) {
+        final a = keyNodes[k - 1];
+        final b = keyNodes[k];
+        final dist = LocationService.calculateDistance(a[0], a[1], b[0], b[1]);
+        final steps = (dist / 100.0).ceil().clamp(10, 500);
+        for (int s = (k == 1 ? 0 : 1); s <= steps; s++) {
+          final t = s / steps;
+          curTime = curTime.add(const Duration(seconds: 5));
+          pts.add(TrackPoint(
+            tripId: 'cross-1',
+            latitude: a[0] + (b[0] - a[0]) * t,
+            longitude: a[1] + (b[1] - a[1]) * t,
+            timestamp: curTime,
+          ));
+        }
+      }
+
+      double totalDist = 0.0;
+      for (int i = 1; i < pts.length; i++) {
+        totalDist += LocationService.calculateDistance(
+          pts[i - 1].latitude, pts[i - 1].longitude,
+          pts[i].latitude, pts[i].longitude,
+        );
+      }
+      final trip = Trip(
+        id: 'cross-1',
+        title: 'Sài Gòn - Đà Lạt',
+        startTime: t0,
+        endTime: curTime,
+        totalDistance: totalDist,
+        startAddress: 'Quận 1, TP. Hồ Chí Minh',
+        endAddress: 'Đà Lạt, Lâm Đồng',
+        points: pts,
+      );
+
+      final summary = ExplorationCalculator.computeSummary([trip], {'cross-1': pts});
+      final traveledProv = summary.traveledMetersByTripProvince['cross-1'];
+      final newProv = summary.newMetersByTripProvince['cross-1'];
+
+      expect(traveledProv, isNotNull);
+      expect(newProv, isNotNull);
+
+      // Must identify ALL 4 provinces along the highway
+      expect(traveledProv!.containsKey('TP. Hồ Chí Minh'), true);
+      expect(traveledProv.containsKey('Bình Dương'), true);
+      expect(traveledProv.containsKey('Đồng Nai'), true);
+      expect(traveledProv.containsKey('Lâm Đồng'), true);
+
+      // Each crossed province gets actual non-zero meters
+      expect(traveledProv['TP. Hồ Chí Minh']!, greaterThan(1000.0));
+      expect(traveledProv['Bình Dương']!, greaterThan(1000.0));
+      expect(traveledProv['Đồng Nai']!, greaterThan(1000.0));
+      expect(traveledProv['Lâm Đồng']!, greaterThan(1000.0));
+
+      expect(newProv!['TP. Hồ Chí Minh']!, greaterThan(1000.0));
+      expect(newProv['Bình Dương']!, greaterThan(1000.0));
+      expect(newProv['Đồng Nai']!, greaterThan(1000.0));
+      expect(newProv['Lâm Đồng']!, greaterThan(1000.0));
     });
   });
 }
