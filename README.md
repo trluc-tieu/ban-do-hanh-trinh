@@ -3,7 +3,7 @@
 Ứng dụng di động Flutter (Android) giúp ghi lại lịch sử di chuyển, khám phá bản đồ thực tế theo cơ chế mở sương mù (**Fog of War**), tính toán chính xác số kilomet đường mới không trùng lặp, mở khóa 63 tỉnh/thành Việt Nam, gom bộ sưu tập ảnh theo địa điểm, tự động nhận diện chuyến đi chạy ngầm và hỗ trợ cập nhật ứng dụng tự động qua GitHub Releases.
 
 > [!NOTE]
-> Ứng dụng hoạt động với kiến trúc đa nguồn bản đồ trực tiếp (**Google Maps**, **OpenMap.vn / NDAMaps Vector**, **OpenStreetMap**, **ESRI**, **Offline Maps**), **hoàn toàn độc lập và không còn sử dụng Goong Map API**.
+> Ứng dụng hoạt động với kiến trúc đa nguồn bản đồ trực tiếp (**Google Maps**, **OpenMap.vn / NDAMaps Vector**, **OpenStreetMap**, **ESRI**, **Offline Maps**)
 
 ---
 
